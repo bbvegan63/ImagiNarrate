@@ -1,69 +1,89 @@
 from dotenv import load_dotenv, find_dotenv
 from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
-from langchain import PromptTemplate, LLMChain, HuggingFaceHub
-from langchain_openai import OpenAI  # Updated import for OpenAI
-import torch
-import requests
+from google import genai
+from google.genai import types
+import wave
 import os
 import streamlit as st
 
 load_dotenv(find_dotenv())
-HUGGINGFACEHUB_API_TOKEN = os.getenv("HUGGINGFACEHUB_API_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Make sure this is set
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # Make sure to set this in your .env
+WAV_FILE_NAME = 'out.wav'
+IMG_FILE_NAME = "image.jpg"
+
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 #imgtotext to create a scenario form the picture
 def img2text(url):
     image_to_text = pipeline("image-to-text", model="Salesforce/blip-image-captioning-base")
     text = image_to_text(url)[0]["generated_text"]
-    print("text", text)
     return text
 
 ##llm to generate a short story using gpt api key
 def generate_story(scenario):
-    template = """
+    prompt = f"""
     You are a story teller;
     You can generate a short story based on a simple narrative, the story should be no more than 50 words;
     
     CONTEXT: {scenario}
     STORY:
     """
-    prompt = PromptTemplate(template=template, input_variables=["scenario"])
     
-    # Updated OpenAI initialization for newer versions
-    story_llm = LLMChain(
-        llm=OpenAI(
-            model_name="gpt-3.5-turbo",
-            temperature=0.7,
-            openai_api_key=OPENAI_API_KEY  # Explicitly pass the API key
-        ),
-        prompt=prompt,
-        verbose=True
-    ) 
-    story = story_llm.predict(scenario=scenario)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt
+    )
+    
+    story = response.text
+    print(story)
     return story
+
+# Set up the wave file to save the output:
+def wave_file(filename, pcm, channels=1, rate=24000, sample_width=2):
+   with wave.open(filename, "wb") as wf:
+      wf.setnchannels(channels)
+      wf.setsampwidth(sample_width)
+      wf.setframerate(rate)
+      wf.writeframes(pcm)
 
 # text to speech
 def text2speech(message):
-    API_URL = "https://api-inference.huggingface.co/models/espnet/kan-bayashi_ljspeech_vits"
-    headers = {"Authorization": f"Bearer {HUGGINGFACEHUB_API_TOKEN}"}
-    payloads = {
-        "inputs": message
-    }
-    response = requests.post(API_URL, headers=headers, json=payloads)
-    with open('audio.flac', 'wb') as file:
-        file.write(response.content)
+    template = f"Say cheerfully: {message}"
+
+    response = client.models.generate_content(
+    model="gemini-2.5-flash-preview-tts",
+    contents=template,
+    config=types.GenerateContentConfig(
+        response_modalities=["AUDIO"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                voice_name='Kore',
+                )
+            )
+        ),
+    )
+    )
+
+    data = response.candidates[0].content.parts[0].inline_data.data
+    wave_file(WAV_FILE_NAME, data) # Saves the file to current directory
 
 def main():
-    st.set_page_config(page_title="img 2 audio story", page_icon="ABC")
-    st.header("Turn img into audio story")
+    st.set_page_config(
+        page_title="ImagiNarrate AI", 
+        page_icon="🎙️",
+        layout="wide"
+    )
+    st.header("🎨 Transform Images into Spoken Stories")
+    st.caption("Upload any image and let AI create and narrate its story")
     uploaded_file = st.file_uploader("Choose an image...", type="jpg")
     
     if uploaded_file is not None:
         bytes_data = uploaded_file.getvalue()
-        with open(uploaded_file.name, "wb") as file:
+        with open(IMG_FILE_NAME, "wb") as file:
             file.write(bytes_data)
         st.image(uploaded_file, caption='Uploaded Image.', use_column_width=True)
-        scenario = img2text(uploaded_file.name)
+        scenario = img2text(IMG_FILE_NAME)
         story = generate_story(scenario)
         text2speech(story)
         
@@ -72,7 +92,7 @@ def main():
         with st.expander("story"):
             st.write(story)
         
-        st.audio("audio.flac")
+        st.audio(WAV_FILE_NAME)
 
 if __name__ == '__main__':
     main()
