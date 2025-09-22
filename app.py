@@ -1,4 +1,3 @@
-from dotenv import load_dotenv, find_dotenv
 from transformers import pipeline
 from google import genai
 from google.genai import types
@@ -10,9 +9,13 @@ import json
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# Load environment variables
-load_dotenv(find_dotenv())
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Load environment variables from Streamlit secrets
+try:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except (KeyError, FileNotFoundError):
+    st.error("❌ GEMINI_API_KEY not found in Streamlit secrets. Please configure it in the Secrets tab.")
+    st.stop()
+
 WAV_FILE_NAME = 'out.wav'
 
 # Initialize Gemini client
@@ -27,8 +30,12 @@ def init_usage_tracking():
 
 def check_rate_limit():
     """Check if the rate limit has been exceeded (max 3 uses per hour)"""
-    with open("usage_tracker.json", "r") as f:
-        data = json.load(f)
+    try:
+        with open("usage_tracker.json", "r") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        init_usage_tracking()
+        return True, 0
     
     # Check if we need to reset the counter (new hour)
     last_reset = datetime.fromisoformat(data["last_reset"])
@@ -39,6 +46,9 @@ def check_rate_limit():
         data["usage_count"] = 0
         data["last_reset"] = now.isoformat()
         data["usage_history"] = []
+        
+        with open("usage_tracker.json", "w") as f:
+            json.dump(data, f)
     
     # Check if limit exceeded
     if data["usage_count"] >= 3:
@@ -48,8 +58,13 @@ def check_rate_limit():
 
 def increment_usage():
     """Increment the usage counter"""
-    with open("usage_tracker.json", "r") as f:
-        data = json.load(f)
+    try:
+        with open("usage_tracker.json", "r") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        init_usage_tracking()
+        with open("usage_tracker.json", "r") as f:
+            data = json.load(f)
     
     # Check if we need to reset the counter (new hour)
     last_reset = datetime.fromisoformat(data["last_reset"])
@@ -90,7 +105,7 @@ def generate_story(scenario):
     """
     
     response = client.models.generate_content(
-        model="gemini-1.5-flash",  # Using a more stable model
+        model="gemini-1.5-flash",
         contents=prompt
     )
     
@@ -110,7 +125,7 @@ def text2speech(message):
     template = f"Say cheerfully: {message}"
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash-preview-tts",  # Updated model name
+        model="gemini-2.5-flash-preview-tts",
         contents=template,
         config=types.GenerateContentConfig(
             response_modalities=["AUDIO"],
@@ -146,14 +161,14 @@ def main():
     
     if not is_allowed:
         st.sidebar.error("❌ Rate limit exceeded")
-        last_reset_time = datetime.fromisoformat(json.load(open("usage_tracker.json"))["last_reset"])
-        next_reset_time = last_reset_time + timedelta(hours=1)
-        st.sidebar.write(f"Next reset: {next_reset_time.strftime('%H:%M:%S')}")
-    
-    # Check if API key is configured
-    if not GEMINI_API_KEY:
-        st.error("❌ Please set the GEMINI_API_KEY in your .env file")
-        return
+        try:
+            with open("usage_tracker.json", "r") as f:
+                data = json.load(f)
+            last_reset_time = datetime.fromisoformat(data["last_reset"])
+            next_reset_time = last_reset_time + timedelta(hours=1)
+            st.sidebar.write(f"Next reset: {next_reset_time.strftime('%H:%M:%S')}")
+        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+            st.sidebar.write("Next reset: In 1 hour")
     
     uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
     
@@ -163,7 +178,6 @@ def main():
             tmp_file.write(uploaded_file.getvalue())
             tmp_file_path = tmp_file.name
         
-        # Fixed: use_container_width instead of use_column_width
         st.image(uploaded_file, caption='Uploaded Image.', use_container_width=True)
         
         if st.button("✨ Generate Story & Audio", type="primary"):
@@ -176,6 +190,8 @@ def main():
                 This demo allows only 3 story generations per hour across all users.
                 Please try again later or contact us for increased access.
                 """)
+                # Clean up temporary file
+                os.unlink(tmp_file_path)
                 return
             
             with st.spinner("🔍 Analyzing image..."):
