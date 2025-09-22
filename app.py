@@ -6,13 +6,72 @@ import wave
 import os
 import streamlit as st
 import tempfile
+import json
+from pathlib import Path
+from datetime import datetime, timedelta
 
+# Load environment variables
 load_dotenv(find_dotenv())
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 WAV_FILE_NAME = 'out.wav'
 
 # Initialize Gemini client
 client = genai.Client(api_key=GEMINI_API_KEY)
+
+# Rate limiting functions
+def init_usage_tracking():
+    """Initialize the usage tracking file if it doesn't exist"""
+    if not Path("usage_tracker.json").exists():
+        with open("usage_tracker.json", "w") as f:
+            json.dump({"usage_count": 0, "last_reset": datetime.now().isoformat(), "usage_history": []}, f)
+
+def check_rate_limit():
+    """Check if the rate limit has been exceeded (max 3 uses per hour)"""
+    with open("usage_tracker.json", "r") as f:
+        data = json.load(f)
+    
+    # Check if we need to reset the counter (new hour)
+    last_reset = datetime.fromisoformat(data["last_reset"])
+    now = datetime.now()
+    
+    if now - last_reset >= timedelta(hours=1):
+        # Reset the counter
+        data["usage_count"] = 0
+        data["last_reset"] = now.isoformat()
+        data["usage_history"] = []
+    
+    # Check if limit exceeded
+    if data["usage_count"] >= 3:
+        return False, data["usage_count"]
+    
+    return True, data["usage_count"]
+
+def increment_usage():
+    """Increment the usage counter"""
+    with open("usage_tracker.json", "r") as f:
+        data = json.load(f)
+    
+    # Check if we need to reset the counter (new hour)
+    last_reset = datetime.fromisoformat(data["last_reset"])
+    now = datetime.now()
+    
+    if now - last_reset >= timedelta(hours=1):
+        # Reset the counter
+        data["usage_count"] = 0
+        data["last_reset"] = now.isoformat()
+        data["usage_history"] = []
+    
+    # Increment usage
+    data["usage_count"] += 1
+    data["usage_history"].append({
+        "timestamp": now.isoformat(),
+        "action": "generate_story"
+    })
+    
+    with open("usage_tracker.json", "w") as f:
+        json.dump(data, f)
+    
+    return data["usage_count"]
 
 # Image to text function
 def img2text(url):
@@ -74,8 +133,22 @@ def main():
         page_icon="🎙️",
         layout="wide"
     )
+    
+    # Initialize usage tracking
+    init_usage_tracking()
+    
     st.header("🎨 Transform Images into Spoken Stories")
     st.caption("Upload any image and let AI create and narrate its story")
+    
+    # Display usage information
+    is_allowed, current_usage = check_rate_limit()
+    st.sidebar.info(f"**Usage this hour:** {current_usage}/3")
+    
+    if not is_allowed:
+        st.sidebar.error("❌ Rate limit exceeded")
+        last_reset_time = datetime.fromisoformat(json.load(open("usage_tracker.json"))["last_reset"])
+        next_reset_time = last_reset_time + timedelta(hours=1)
+        st.sidebar.write(f"Next reset: {next_reset_time.strftime('%H:%M:%S')}")
     
     # Check if API key is configured
     if not GEMINI_API_KEY:
@@ -94,6 +167,17 @@ def main():
         st.image(uploaded_file, caption='Uploaded Image.', use_container_width=True)
         
         if st.button("✨ Generate Story & Audio", type="primary"):
+            # Check rate limit before processing
+            is_allowed, current_usage = check_rate_limit()
+            if not is_allowed:
+                st.error("""
+                ❌ Rate limit exceeded!
+                
+                This demo allows only 3 story generations per hour across all users.
+                Please try again later or contact us for increased access.
+                """)
+                return
+            
             with st.spinner("🔍 Analyzing image..."):
                 scenario = img2text(tmp_file_path)
             
@@ -102,6 +186,10 @@ def main():
             
             with st.spinner("🔊 Converting to speech..."):
                 text2speech(story)
+            
+            # Increment usage counter after successful generation
+            new_usage_count = increment_usage()
+            st.sidebar.info(f"**Usage this hour:** {new_usage_count}/3")
             
             # Display results in columns
             col1, col2 = st.columns(2)
