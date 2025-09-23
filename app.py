@@ -142,9 +142,64 @@ def text2speech(message):
     data = response.candidates[0].content.parts[0].inline_data.data
     wave_file(WAV_FILE_NAME, data)
 
+def render_santostar_promotion():
+    """Render Santo Star Limited promotional elements"""
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🚀 Powered by Santo Star Limited")
+    st.sidebar.markdown("""
+    **Enterprise AI Solutions:**
+    - Custom AI Storytelling
+    - Unlimited Usage Plans
+    - White-label Solutions
+    - API Integration
+    """)
+    
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📧 Contact for Full Access")
+    st.sidebar.markdown("""
+    **Email:** inquiries@santostar.com  
+    **Website:** www.santostar.com  
+    **Plans:** Starter, Business, Enterprise
+    """)
+    
+    if st.sidebar.button("📩 Request Enterprise Demo"):
+        st.sidebar.success("Contact inquiries@santostar.com for a custom demo!")
+
+def render_rate_limit_message(current_usage, is_allowed):
+    """Render rate limit information with Santo Star promotion"""
+    if not is_allowed:
+        st.error("""
+        ❌ **Rate Limit Exceeded!**
+        
+        This demo allows **3 story generations per hour** across all users.
+        
+        🚀 **For unlimited access and enterprise features:**
+        - **Custom AI solutions**
+        - **Higher rate limits**
+        - **White-label applications**
+        - **API integration**
+        
+        📧 **Contact:** inquiries@santostar.com
+        """)
+        
+        try:
+            with open("usage_tracker.json", "r") as f:
+                data = json.load(f)
+            last_reset_time = datetime.fromisoformat(data["last_reset"])
+            next_reset_time = last_reset_time + timedelta(hours=1)
+            st.info(f"⏰ **Next reset:** {next_reset_time.strftime('%H:%M:%S')}")
+        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+            st.info("⏰ **Next reset:** In 1 hour")
+        
+        return False
+    else:
+        if current_usage >= 2:  # Warning when approaching limit
+            st.warning(f"⚠️ **Usage Alert:** {current_usage}/3 generations used this hour. Contact inquiries@santostar.com for unlimited access.")
+        return True
+
 def main():
     st.set_page_config(
-        page_title="ImagiNarrate AI", 
+        page_title="ImagiNarrate AI by Santo Star", 
         page_icon="🎙️",
         layout="wide"
     )
@@ -152,23 +207,36 @@ def main():
     # Initialize usage tracking
     init_usage_tracking()
     
-    st.header("🎨 Transform Images into Spoken Stories")
-    st.caption("Upload any image and let AI create and narrate its story")
+    # Main header with Santo Star branding
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        st.header("🎨 ImagiNarrate AI - Transform Images into Spoken Stories")
+        st.caption("Powered by Santo Star Limited • Upload any image and let AI create and narrate its story")
+    with col2:
+        st.markdown("""
+        <div style='text-align: right; padding: 10px; background: #f0f2f6; border-radius: 5px;'>
+            <strong>Santo Star Limited</strong><br>
+            <small>AI Innovation</small>
+        </div>
+        """, unsafe_allow_html=True)
     
     # Display usage information
     is_allowed, current_usage = check_rate_limit()
-    st.sidebar.info(f"**Usage this hour:** {current_usage}/3")
     
-    if not is_allowed:
-        st.sidebar.error("❌ Rate limit exceeded")
-        try:
-            with open("usage_tracker.json", "r") as f:
-                data = json.load(f)
-            last_reset_time = datetime.fromisoformat(data["last_reset"])
-            next_reset_time = last_reset_time + timedelta(hours=1)
-            st.sidebar.write(f"Next reset: {next_reset_time.strftime('%H:%M:%S')}")
-        except (FileNotFoundError, json.JSONDecodeError, KeyError):
-            st.sidebar.write("Next reset: In 1 hour")
+    # Sidebar content
+    with st.sidebar:
+        st.title("📊 Usage Dashboard")
+        st.metric("Generations This Hour", f"{current_usage}/3")
+        
+        if not is_allowed:
+            st.error("❌ Limit Exceeded")
+        elif current_usage >= 2:
+            st.warning("⚠️ Approaching Limit")
+        else:
+            st.success("✅ Within Limit")
+        
+        # Santo Star promotion
+        render_santostar_promotion()
     
     uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
     
@@ -183,13 +251,7 @@ def main():
         if st.button("✨ Generate Story & Audio", type="primary"):
             # Check rate limit before processing
             is_allowed, current_usage = check_rate_limit()
-            if not is_allowed:
-                st.error("""
-                ❌ Rate limit exceeded!
-                
-                This demo allows only 3 story generations per hour across all users.
-                Please try again later or contact us for increased access.
-                """)
+            if not render_rate_limit_message(current_usage, is_allowed):
                 # Clean up temporary file
                 os.unlink(tmp_file_path)
                 return
@@ -205,7 +267,13 @@ def main():
             
             # Increment usage counter after successful generation
             new_usage_count = increment_usage()
-            st.sidebar.info(f"**Usage this hour:** {new_usage_count}/3")
+            
+            # Update sidebar metric
+            st.sidebar.metric("Generations This Hour", f"{new_usage_count}/3")
+            
+            # Success message with promotion
+            st.success("🎉 Story generated successfully!")
+            st.info("💡 **Want unlimited access?** Contact inquiries@santostar.com for enterprise plans!")
             
             # Display results in columns
             col1, col2 = st.columns(2)
@@ -219,6 +287,7 @@ def main():
                     st.write(story)
             
             # Audio player
+            st.subheader("🎧 Listen to Your Story")
             st.audio(WAV_FILE_NAME)
             
             # Download button for audio
@@ -226,12 +295,36 @@ def main():
                 st.download_button(
                     label="⬇️ Download Audio",
                     data=audio_file,
-                    file_name="ai_generated_story.wav",
+                    file_name="santostar_ai_story.wav",
                     mime="audio/wav"
                 )
             
+            # Enterprise CTA section
+            st.markdown("---")
+            st.markdown("### 🚀 Ready for More?")
+            st.markdown("""
+            **Santo Star Limited offers enterprise solutions:**
+            - ✅ **Unlimited story generations**
+            - ✅ **Custom AI models**
+            - ✅ **Batch processing**
+            - ✅ **API access**
+            - ✅ **White-label applications**
+            
+            **Contact us today:** inquiries@santostar.com
+            """)
+            
             # Clean up temporary file
             os.unlink(tmp_file_path)
+    
+    # Footer with Santo Star branding
+    st.markdown("---")
+    st.markdown("""
+    <div style='text-align: center; color: #666; padding: 20px;'>
+        <strong>ImagiNarrate AI</strong> • Powered by <strong>Santo Star Limited</strong> • 
+        <a href="mailto:inquiries@santostar.com" style='color: #007bff;'>inquiries@santostar.com</a> • 
+        <a href="https://www.santostar.com" style='color: #007bff;'>www.santostar.com</a>
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == '__main__':
     main()
